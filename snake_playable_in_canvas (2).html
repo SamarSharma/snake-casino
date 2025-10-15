@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Snake Casino — Memory Mode</title>
+  <style>
+    :root{
+      --bg:#f6f6f2; --panel:#ffffff; --ink:#111827; --muted:#6b7280; --border:rgba(0,0,0,0.12);
+      --accent:#111827; --accent2:#1f2937; --good:#16a34a; --bad:#ef4444; --warn:#f59e0b;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0; background:var(--bg); color:var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;}
+    .app{max-width:1000px; margin:0 auto; padding:16px;}
+
+    .header{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px}
+    .badge{background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:8px 12px;}
+    .title{font-weight:800; letter-spacing:.3px}
+
+    .grid{display:grid; grid-template-columns:1fr 300px; gap:12px}
+    .panel{background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:12px; box-shadow:0 10px 20px rgba(0,0,0,.05)}
+    .sidebar{display:flex; flex-direction:column; gap:12px}
+    .stat{display:flex; align-items:center; justify-content:space-between; padding:8px 10px; border:1px solid var(--border); border-radius:10px; background:#fafafa}
+    .stat b{font-weight:800}
+
+    canvas{width:100%; height:auto; background:#f7f7f2; border:1px solid var(--border); border-radius:12px; image-rendering: pixelated; box-shadow: inset 0 0 30px rgba(0,0,0,.06)}
+
+    button, select, input[type=number]{border-radius:10px; border:1px solid var(--border); background:#fff; color:var(--ink); padding:10px 12px; font-weight:600}
+    button.primary{background:linear-gradient(180deg,#111827,#1f2937); color:#fff; border:none}
+    button.danger{background:#fff0f0; color:#b91c1c}
+    button:disabled{opacity:.6; cursor:not-allowed}
+
+    .hint{font-size:12px; color:var(--muted)}
+    .footer{margin-top:10px; text-align:center; color:var(--muted); font-size:12px}
+
+    @media (max-width: 900px){ .grid{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <div class="title">🐍 <span>Snake Casino</span> — <span class="hint">Enter/Space to start after bet • Arrows/WASD to move • P to pause • R to restart</span></div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="badge">🪙 Coins: <b id="coinsHeader">10,000</b></div>
+        <button id="btnPlay" class="badge">▶️ Play</button>
+        <button id="btnPause" class="badge">⏸️ Pause</button>
+        <button id="btnRestart" class="badge">🔄 Restart</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <canvas id="board" width="720" height="720" aria-label="Snake game board" role="img" tabindex="0"></canvas>
+      </div>
+
+      <div class="sidebar">
+        <!-- BET PANEL -->
+        <div class="panel" id="casino">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:8px">
+            <div style="font-weight:800">🎰 Bet</div>
+            <div class="stat" style="gap:8px; padding:6px 8px"><span>Status</span><b id="betStatus">Welcome — place a bet to begin</b></div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px">
+            <label for="bet" style="white-space:nowrap">Amount</label>
+            <input id="bet" type="number" min="1" step="1" value="100" style="flex:1"/>
+            <button id="placeBet" class="primary">Place</button>
+          </div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px">
+            <button id="betPlus10">+10</button>
+            <button id="betPlus100">+100</button>
+            <button id="betHalf">½</button>
+            <button id="betMax">Max</button>
+            <button id="betClear">Clear</button>
+            <button id="resetCoins" class="danger" style="margin-left:auto">Reset Coins</button>
+          </div>
+
+          <div class="stat" style="gap:8px">
+            <span>Multiplier</span>
+            <select id="multPick">
+              <option value="1.5" selected>1.50× (2 bombs)</option>
+              <option value="2">2.00× (3 bombs)</option>
+              <option value="2.5">2.50× (4 bombs)</option>
+              <option value="3">3.00× (5 bombs)</option>
+              <option value="3.5">3.50× (6 bombs)</option>
+              <option value="4">4.00× (7 bombs)</option>
+              <option value="4.5">4.50× (8 bombs)</option>
+              <option value="5">5.00× (9 bombs)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="stat"><span>Score</span><b id="score">0</b></div>
+        <div class="stat"><span>High Score</span><b id="high">0</b></div>
+        <div class="stat"><span>Coins</span><b id="coins">10,000</b></div>
+
+        <div>
+          <button id="btnSave" class="primary">💾 Save Snapshot</button>
+          <button id="btnClearHS" class="danger">Reset High Score</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">Single-file HTML · Host anywhere · ©</div>
+  </div>
+
+  <script>
+  (function(){
+    // ===== Canvas & Layout =====
+    const canvas = document.getElementById('board');
+    const ctx = canvas.getContext('2d');
+    canvas.addEventListener('mousedown', ()=> canvas.focus());
+
+    function fitCanvas(){
+      const max = Math.min(canvas.parentElement.clientWidth, 720);
+      const size = Math.max(360, max);
+      canvas.style.width = size + 'px';
+      canvas.style.height = size + 'px';
+    }
+    new ResizeObserver(fitCanvas).observe(canvas.parentElement); fitCanvas();
+
+    // ===== UI refs =====
+    const ui = {
+      score: document.getElementById('score'),
+      high: document.getElementById('high'),
+      play: document.getElementById('btnPlay'),
+      pause: document.getElementById('btnPause'),
+      restart: document.getElementById('btnRestart'),
+      save: document.getElementById('btnSave'),
+      clearHS: document.getElementById('btnClearHS'),
+      coinsHeader: document.getElementById('coinsHeader')
+    };
+
+    // ===== Game State =====
+    const GRID = 24;
+    const COLORS = { bg:'#f7f7f2', grid:'#d1d5db', snake1:'#0ea5e9', snake2:'#22c55e', food:'#eab308', bombRed:'#ef4444', dead:'#ef4444' };
+
+    let state;
+    let bankroll = Number(localStorage.getItem('snake_bankroll')||10000);
+    let currentBet = 0;
+    let betActive = false;            // round is armed/reveal/memorize/play
+    let safeCollected = 0;            // safes eaten this round
+    const TOTAL_DOTS = 25;            // total pellets on board during a round
+    let currentBombs = 5;             // dynamic (by multiplier)
+    let currentSafes = TOTAL_DOTS - currentBombs;
+    let bombs = new Set();            // indices of bombs
+
+    // ===== FX (bomb hit) =====
+    const fx = { flash: 0, shake: 0, particles: [] }; // flash [0..1], shake px, particle list
+
+    // phases: welcome → armed → reveal(5s) → memorize(2s) → play → ended
+    let phase = 'welcome';
+    let phaseUntil = 0;
+
+    let lastStep = 0;
+    let stepInterval = 1000/12;       // Classic speed
+    let paused = true;
+    let gameStarted = false;
+
+    // center snake
+    function resetSnakeToCenter(){
+      const len = 4; const cx = Math.floor(GRID/2); const cy = Math.floor(GRID/2);
+      const body = []; for(let i=0;i<len;i++) body.push({x:cx - i, y:cy});
+      state.snake = body; state.dir = {x:1,y:0}; state.nextDir = {x:1,y:0};
+    }
+
+    function init(){
+      const cx = Math.floor(GRID/2), cy = Math.floor(GRID/2);
+      const body = []; for(let i=0;i<4;i++) body.push({x:cx - i, y:cy});
+      state = { dir:{x:1,y:0}, nextDir:{x:1,y:0}, snake:body, pellets:[], score:0, high:Number(localStorage.getItem('snake_high')||0), dead:false };
+      bombs.clear(); safeCollected = 0; betActive=false; currentBet=0; phase='welcome';
+      updateBankroll(0);
+      updateBetStatus('Welcome — place a bet to begin');
+      ui.high.textContent = state.high; ui.score.textContent = state.score;
+      paused = true; gameStarted=false;
+      draw();
+    }
+
+    function uniqueCell(exclude){
+      while(true){
+        const pos = {x: Math.floor(Math.random()*GRID), y: Math.floor(Math.random()*GRID)};
+        if(!exclude.some(p=>p && p.x===pos.x && p.y===pos.y)) return pos;
+      }
+    }
+    function spawnPellets(count){
+      const occupied = [...(state?state.snake:[])];
+      const pellets = [];
+      for(let i=0;i<count;i++) pellets.push(uniqueCell(occupied.concat(pellets.filter(Boolean))));
+      return pellets;
+    }
+    function chooseBombs(total, bombsCount){
+      const set = new Set(); while(set.size<bombsCount) set.add(Math.floor(Math.random()*total)); return set;
+    }
+    function bombsForMultiplier(m){
+      const map = {1.5:2, 2:3, 2.5:4, 3:5, 3.5:6, 4:7, 4.5:8, 5:9}; return map[m] ?? 5;
+    }
+
+    function startRoundPhases(){
+      if(!betActive || phase!=='armed') return;
+      state.pellets = spawnPellets(TOTAL_DOTS);
+      currentBombs = bombsForMultiplier(getMultiplier());
+      currentSafes = TOTAL_DOTS - currentBombs;
+      bombs = chooseBombs(TOTAL_DOTS, currentBombs);
+      safeCollected = 0;
+
+      phase='reveal'; phaseUntil = performance.now()+5000; updateBetStatus('Memorize the red bombs (5s)');
+      lastStep=0; requestAnimationFrame(rafTick);
+      setTimeout(()=>{ phase='memorize'; phaseUntil = performance.now()+2000; updateBetStatus('Get ready… (2s)'); }, 5000);
+      setTimeout(()=>{ phase='play'; updateBetStatus('Go! Avoid bombs, eat all safes'); state.dead=false; paused=false; gameStarted=true; lastStep=0; requestAnimationFrame(rafTick); }, 7000);
+    }
+
+    function step(){
+      if(state.dead || paused || !gameStarted || phase!=='play') return;
+      const {x:nx,y:ny} = state.nextDir; const hx=state.snake[0].x, hy=state.snake[0].y;
+      if(!(state.snake.length>1 && hx+nx===state.snake[1]?.x && hy+ny===state.snake[1]?.y)) state.dir = state.nextDir;
+      let head = {x:hx+state.dir.x, y:hy+state.dir.y};
+      if(head.x<0 || head.x>=GRID || head.y<0 || head.y>=GRID) return crashLoss();
+      if(state.snake.some(p=>p.x===head.x && p.y===head.y)) return crashLoss();
+      state.snake.unshift(head);
+
+      const hitIndex = state.pellets.findIndex(p=>p && p.x===head.x && p.y===head.y);
+      if(hitIndex!==-1){
+        // score & high
+        state.score += 1; ui.score.textContent = state.score;
+        if(state.score>state.high){ state.high=state.score; ui.high.textContent=state.high; localStorage.setItem('snake_high',state.high); }
+
+        if(betActive && bombs.has(hitIndex)){
+          // Bomb eaten -> loss with FX then end the round
+          updateBankroll(-currentBet);
+          updateBetStatus('💥 Bomb! Lost '+currentBet+' coins');
+          bombFXAt(head.x, head.y);
+          setTimeout(()=> endRound(false), 550);
+        } else {
+          // Safe pellet
+          if(betActive){
+            safeCollected += 1;
+            if(safeCollected>=currentSafes){
+              const winAmt=Math.floor(currentBet*getMultiplier());
+              updateBankroll(winAmt);
+              updateBetStatus('✅ Cleared all safes! +'+winAmt+' coins');
+              endRound(true);
+              return;
+            } else {
+              updateBetStatus((currentSafes-safeCollected)+' safes to win');
+            }
+          }
+          // remove eaten pellet; no respawn
+          state.pellets[hitIndex]=null;
+        }
+      } else {
+        // no pellet: move by dropping tail
+        state.snake.pop();
+      }
+    }
+
+    function crashLoss(){
+      if(betActive){ updateBankroll(-currentBet); updateBetStatus('💥 Crash! Lost '+currentBet+' coins'); endRound(false); return; }
+      state.dead=true; draw();
+    }
+
+    function endRound(won){
+      betActive=false; gameStarted=false; paused=true; phase='ended'; resetSnakeToCenter(); state.pellets=[]; state.dead=true; draw();
+    }
+
+    function draw(){
+      const cw=canvas.width, ch=canvas.height;
+
+      // Camera shake
+      ctx.save();
+      if(fx.shake>0){
+        const sx = (Math.random()*2-1)*fx.shake;
+        const sy = (Math.random()*2-1)*fx.shake;
+        ctx.translate(sx, sy);
+        fx.shake *= 0.85; if(fx.shake < 0.5) fx.shake = 0;
+      }
+
+      // Board
+      ctx.fillStyle=COLORS.bg; ctx.fillRect(0,0,cw,ch);
+      ctx.strokeStyle=COLORS.grid; ctx.lineWidth=1; for(let i=0;i<=GRID;i++){ const p=Math.floor(i*(cw/GRID)); ctx.beginPath(); ctx.moveTo(p,0); ctx.lineTo(p,ch); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,p); ctx.lineTo(cw,p); ctx.stroke(); }
+
+      // Pellets (show bombs in reveal phase)
+      if(state.pellets && state.pellets.length){
+        state.pellets.forEach((p,idx)=>{ if(!p) return; const showBomb=(phase==='reveal' && bombs.has(idx)); drawCell(p.x,p.y, showBomb?COLORS.bombRed:COLORS.food, 6); });
+      }
+
+      // Snake
+      state.snake.forEach((p,idx)=>{ const c=lerpColor(COLORS.snake1,COLORS.snake2, Math.min(idx/(state.snake.length-1||1),1)); drawCell(p.x,p.y,c, idx===0?2:4); });
+
+      // Particles on top
+      if(fx.particles.length){ updateAndDrawParticles(); }
+
+      ctx.restore();
+
+      // Flash overlay (full-canvas)
+      if(fx.flash>0){ ctx.fillStyle = `rgba(239,68,68,${fx.flash})`; ctx.fillRect(0,0,cw,ch); fx.flash *= 0.85; if(fx.flash<0.03) fx.flash = 0; }
+
+      // Overlays
+      if(phase==='welcome'){ overlay('Welcome', 'Place a bet to begin'); }
+      else if(!betActive && phase!=='reveal' && phase!=='memorize' && phase!=='play'){ overlay('Game Over', 'Place a bet to play'); }
+      else if(phase==='armed'){ overlay('Press Enter/Space to start', 'Then memorize bombs for 5s'); }
+      else if(phase==='reveal'){ const s=Math.max(0, Math.ceil((phaseUntil-performance.now())/1000)); overlay('Memorize the red bombs', s+'…'); }
+      else if(phase==='memorize'){ const s=Math.max(0, Math.ceil((phaseUntil-performance.now())/1000)); overlay('Get ready…', s+'…'); }
+      else if(paused && gameStarted){ overlay('Paused','Press P to resume'); }
+    }
+
+    function overlay(main, sub){ ctx.fillStyle='rgba(0,0,0,.35)'; ctx.fillRect(0,0,canvas.width,canvas.height); drawCenteredText(main,32,'#111827'); if(sub) drawCenteredText(sub,16,'#374151',34); }
+    function drawCenteredText(text,size,color,dy=0){ ctx.fillStyle=color; ctx.font=`800 ${size}px system-ui, -apple-system, Segoe UI, Roboto`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(text, canvas.width/2, canvas.height/2+dy); }
+
+    function drawCell(x,y,color,pad=4){ const cw=canvas.width/GRID, ch=canvas.height/GRID; const px=Math.floor(x*cw)+pad, py=Math.floor(y*ch)+pad; const w=Math.floor(cw-pad*2), h=Math.floor(ch-pad*2); const r=Math.min(10, Math.min(w,h)/3); ctx.fillStyle=color; roundedRect(px,py,w,h,r); ctx.fill(); }
+    function roundedRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+
+    function hexToRgb(hex){ const h=hex.replace('#',''); const n=parseInt(h.length===3?h.split('').map(c=>c+c).join(''):h,16); return [(n>>16)&255,(n>>8)&255,n&255]; }
+    function rgbToHex([r,g,b]){ return '#'+[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+    function lerp(a,b,t){ return a+(b-a)*t; }
+    function lerpColor(a,b,t){ const ra=hexToRgb(a), rb=hexToRgb(b); return rgbToHex([Math.round(lerp(ra[0],rb[0],t)), Math.round(lerp(ra[1],rb[1],t)), Math.round(lerp(ra[2],rb[2],t))]); }
+
+    function setDir(x,y){ state.nextDir={x,y}; }
+
+    // ===== Input =====
+    document.addEventListener('keydown', (e)=>{
+      const k = e.key.toLowerCase();
+      if(['arrowup','arrowdown','arrowleft','arrowright',' ','enter'].includes(k)) e.preventDefault();
+      if(k==='enter' || k===' '){ if(betActive && phase==='armed') startRoundPhases(); return; }
+      if(!gameStarted || phase!=='play') return;
+      if(k==='arrowup' || k==='w'){ setDir(0,-1); }
+      else if(k==='arrowdown' || k==='s'){ setDir(0,1); }
+      else if(k==='arrowleft' || k==='a'){ setDir(-1,0); }
+      else if(k==='arrowright' || k==='d'){ setDir(1,0); }
+      else if(k==='p'){ togglePause(); }
+      else if(k==='r'){ init(); }
+    }, {passive:false});
+
+    function togglePause(){ if(state.dead || !gameStarted || phase!=='play') return; paused=!paused; ui.pause.textContent = paused?'▶️ Resume':'⏸️ Pause'; if(!paused){ lastStep=0; requestAnimationFrame(rafTick);} else { draw(); } }
+
+    // ===== Betting & coins =====
+    const coinsEl = document.getElementById('coins');
+    const betInput = document.getElementById('bet');
+    const multPick = document.getElementById('multPick');
+    const betStatusEl = document.getElementById('betStatus');
+    function formatCoins(n){ return n.toLocaleString(); }
+    function updateBankroll(delta){ bankroll=Math.max(0,bankroll+delta); localStorage.setItem('snake_bankroll',bankroll); coinsEl.textContent=formatCoins(bankroll); if(ui.coinsHeader) ui.coinsHeader.textContent=formatCoins(bankroll); }
+    function updateBetStatus(text){ betStatusEl.textContent=text; }
+    function getMultiplier(){ const m=Number(multPick?.value||1.5); return Math.min(5, Math.max(1.5, m)); }
+
+    function placeBet(){
+      if(betActive){ updateBetStatus('Bet already active'); return; }
+      const amt = Math.floor(Number(betInput.value||0)); if(!amt || amt<=0){ updateBetStatus('Enter a valid bet'); return; } if(amt>bankroll){ updateBetStatus('Insufficient coins'); return; }
+      currentBet=amt; betActive=true; safeCollected=0; bombs.clear();
+      resetSnakeToCenter(); state.pellets=[]; state.dead=false; paused=true; gameStarted=false; phase='armed';
+      updateBetStatus('Bet placed — press Enter/Space to start (5s reveal)'); draw();
+    }
+
+    document.getElementById('placeBet').onclick = ()=> placeBet();
+    document.getElementById('resetCoins').onclick = ()=>{ bankroll=10000; localStorage.setItem('snake_bankroll',bankroll); coinsEl.textContent=formatCoins(bankroll); if(ui.coinsHeader) ui.coinsHeader.textContent=formatCoins(bankroll); updateBetStatus('Coins reset'); };
+    document.getElementById('betPlus10').onclick = ()=> betInput.value = Math.max(1, Number(betInput.value||0)+10);
+    document.getElementById('betPlus100').onclick = ()=> betInput.value = Math.max(1, Number(betInput.value||0)+100);
+    document.getElementById('betHalf').onclick = ()=> betInput.value = Math.max(1, Math.floor(bankroll/2));
+    document.getElementById('betMax').onclick = ()=> betInput.value = Math.max(1, bankroll);
+    document.getElementById('betClear').onclick = ()=> betInput.value = 0;
+
+    ui.play.onclick = ()=>{ updateBetStatus('Press Enter/Space to start'); draw(); };
+    ui.pause.onclick = togglePause;
+    ui.restart.onclick = ()=> init();
+    ui.save.onclick = ()=>{ const url=canvas.toDataURL('image/png'); const a=document.createElement('a'); a.href=url; a.download=`snake_${Date.now()}.png`; a.click(); };
+    ui.clearHS.onclick = ()=>{ localStorage.removeItem('snake_high'); state.high=0; ui.high.textContent='0'; };
+
+    // ===== Bomb FX helpers =====
+    function gridToPixels(cx, cy){ const cw=canvas.width/GRID, ch=canvas.height/GRID; return { x: (cx+0.5)*cw, y: (cy+0.5)*ch, cw, ch }; }
+    function bombFXAt(cx, cy){
+      const {x,y} = gridToPixels(cx, cy);
+      // flash & shake
+      fx.flash = 0.9; fx.shake = 10;
+      // particles
+      fx.particles.length = 0;
+      const N = 40;
+      for(let i=0;i<N;i++){
+        const ang = Math.random()*Math.PI*2;
+        const spd = 2 + Math.random()*4;
+        fx.particles.push({ x, y, vx: Math.cos(ang)*spd, vy: Math.sin(ang)*spd, life: 24 + Math.random()*10, r: 3 + Math.random()*2 });
+      }
+    }
+    function updateAndDrawParticles(){
+      ctx.save();
+      for(let i=fx.particles.length-1;i>=0;i--){
+        const p = fx.particles[i];
+        p.x += p.vx; p.y += p.vy; p.vx *= 0.96; p.vy *= 0.96; p.vy += 0.05; // slight gravity
+        p.life -= 1;
+        const a = Math.max(0, p.life/30);
+        ctx.fillStyle = `rgba(239,68,68,${a})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI*2); ctx.fill();
+        if(p.life<=0) fx.particles.splice(i,1);
+      }
+      ctx.restore();
+    }
+
+    function rafTick(ts){
+      if(!lastStep) lastStep=ts; const delta=ts-lastStep;
+      if(!paused && gameStarted && phase==='play' && delta>=stepInterval){
+        lastStep = ts-(delta%stepInterval);
+        step();
+      }
+      draw();
+      const revealing = (betActive && (phase==='reveal'||phase==='memorize'));
+      const fxActive = fx.flash>0 || fx.shake>0 || fx.particles.length>0;
+      if((!paused && gameStarted) || revealing || fxActive) requestAnimationFrame(rafTick);
+    }
+
+    // Boot
+    stepInterval = 1000/12;
+    const storedCoins = Number(localStorage.getItem('snake_bankroll')||10000); document.getElementById('coins').textContent = storedCoins.toLocaleString(); if(ui.coinsHeader) ui.coinsHeader.textContent = storedCoins.toLocaleString();
+    if(multPick){ multPick.onchange = ()=>{ const m=getMultiplier(); const b=bombsForMultiplier(m); updateBetStatus(`Multiplier ${m.toFixed(2)}× → ${b} bombs`); }; }
+    init();
+
+    // Debug helpers (only with ?debug=1)
+    window.__snakeDiagnostics = {
+      get state(){ return { betActive, gameStarted, safeCollected, bombs:Array.from(bombs), bankroll, currentBet, phase, currentBombs, currentSafes }; },
+      placeBet(amt=100){ document.getElementById('bet').value=amt; document.getElementById('placeBet').click(); return {betActive, currentBet, phase}; },
+      startPhases(){ startRoundPhases(); return {phase, pellets: state.pellets.length, bombs: bombs.size}; },
+      assert(c,m){ console[c?'log':'error']((c?'PASS: ':'FAIL: ')+m); }
+    };
+    if(new URLSearchParams(location.search).get('debug')==='1'){
+      (function runDebugTests(){
+        const d = window.__snakeDiagnostics;
+        d.assert(typeof step === 'function', 'step() exists');
+        d.assert(document.getElementById('board'), '#board canvas exists');
+        const r = d.placeBet(123); d.assert(r.betActive && r.currentBet===123 && r.phase==='armed','placing bet arms round');
+        const s = d.startPhases(); d.assert(s.phase==='reveal','enter reveal phase'); d.assert(s.pellets===25 && s.bombs===bombsForMultiplier(getMultiplier()), '25 pellets, bombs match multiplier');
+      })();
+    }
+  })();
+  </script>
+</body>
+</html>
